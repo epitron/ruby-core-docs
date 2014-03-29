@@ -28,6 +28,13 @@ def ensure_directory(path)
   end
 end
 
+def print_title(message, width=70)
+    puts "="*width
+    puts " #{message}"
+    puts "-"*width
+    puts
+end
+
 ###############################################################################
 
 desc "Remove everything: rubies, cache, yardocs, etc."
@@ -67,13 +74,16 @@ task :build => :docs do
   Dir["cache/*"].each do |cachedir|
     version = cachedir.split("/").last
 
+    print_title "Building gem for Ruby #{version}..."
+
     ensure_removed YARD_DIR
     cp_r cachedir, YARD_DIR
 
-    puts "Version: #{version}"
     File.write("VERSION", version)
 
     system "gem build .gemspec"
+
+    puts
   end
 end
 
@@ -84,10 +94,7 @@ task :docs do
 
   Dir["#{RUBIES_DIR}/*"].each do |tarball|
 
-    puts "="*60
-    puts " Building documentation for #{tarball}..."
-    puts "-"*60
-    puts
+    print_title "Generating YARD docs for #{tarball}..."
 
     ## Get version from tarball
     if tarball =~ /ruby-([\d\.]+)(-p\d+)?\.tar\.gz$/
