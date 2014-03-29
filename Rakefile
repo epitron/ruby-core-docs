@@ -12,13 +12,63 @@ CACHE_DIR  = "cache"
 ###############################################################################
 
 require 'fileutils'
+include FileUtils
 
-task :build do
+###############################################################################
+
+def ensure_removed(path)
+  rm_r path if File.exists? path
+end
+
+def ensure_directory(path)
+  if not File.exists? path
+    mkdir path
+  elsif not File.directory? path
+    raise "Error: #{path} is a file. We need to make a directory here. Please fix."
+  end
+end
+
+###############################################################################
+
+desc "Remove everything: rubies, cache, yardocs, etc."
+task :pristine do
+  to_remove = [RUBIES_DIR, SRC_DIR, YARD_DIR, CACHE_DIR, "VERSION"] + Dir["*.gem"]
+
+  to_remove.each do |path|
+    ensure_removed path
+  end
+end
+
+###############################################################################
+
+desc "Build, then 'gem push' all the built gems"
+task :release => :build do
+  Dir["*.gem"].each { |gemfile| system "gem push #{gemfile}" }
+end
+
+###############################################################################
+
+desc "Download all the rubies"
+task :download do
+  ensure_directory RUBIES_DIR
+
+  require "latest_ruby"
+
+  %w[ruby19 ruby20 ruby21].each do |ver|
+    url = Latest.send(ver).link
+    system "wget -c #{url} --directory-prefix=#{RUBIES_DIR}"
+  end
+end
+
+###############################################################################
+
+desc "Build all the YARD docs and all the gems for all the rubies in 'rubies/'"
+task :build => :docs do
   Dir["cache/*"].each do |cachedir|
     version = cachedir.split("/").last
 
-    FileUtils.rm_r YARD_DIR
-    FileUtils.cp_r cachedir, YARD_DIR
+    ensure_removed YARD_DIR
+    cp_r cachedir, YARD_DIR
 
     puts "Version: #{version}"
     File.write("VERSION", version)
@@ -27,35 +77,19 @@ task :build do
   end
 end
 
-task :release => :build do
-  system "gem push #{project_name}-#{gem_version}.gem"
-end
-
-task :install => :build do
-  system "gem install #{project_name}-#{gem_version}.gem"
-end
-
 ###############################################################################
 
-task :download do
-  Dir.mkdir RUBIES_DIR unless File.directory? RUBIES_DIR
-
-  require "latest_ruby"
-
-  %w[ruby19  ruby20  ruby21].each do |ver|
-    url = Latest.send(ver).link
-    system "wget -c #{url} --directory-prefix=#{RUBIES_DIR}"
-  end
-end
-
-###############################################################################
-
+desc "Just build YARD docs for each ruby in 'rubies/', and store the results in 'cache/'"
 task :docs do
 
   Dir["#{RUBIES_DIR}/*"].each do |tarball|
 
-    ## Get version from tarball
+    puts "="*60
+    puts " Building documentation for #{tarball}..."
+    puts "-"*60
+    puts
 
+    ## Get version from tarball
     if tarball =~ /ruby-([\d\.]+)(-p\d+)?\.tar\.gz$/
       version = $1
     else
@@ -63,44 +97,47 @@ task :docs do
     end
 
     # Make sure 'cache/' exists
-
-    Dir.mkdir CACHE_DIR unless File.directory? CACHE_DIR
+    ensure_directory CACHE_DIR
 
     # Skip this ruby version if it's already been generated
     cache_dir = "#{CACHE_DIR}/#{version}"
-
     if File.exists? cache_dir
-      puts "Skipping #{cache_dir}"
+      puts "Already built (#{cache_dir}); skipping..."
+      puts
       next
     end
 
     # Make "src/"
-
-    FileUtils.rm_r SRC_DIR if File.directory? SRC_DIR
-    Dir.mkdir SRC_DIR
+    ensure_removed SRC_DIR
+    ensure_directory SRC_DIR
 
     # Untar ruby source
-    system "tar zxvf #{tarball} --directory=#{SRC_DIR}"
+    puts "* Extracting #{tarball}"
+    unless system "tar zxf #{tarball} --directory=#{SRC_DIR}"
+      raise "* Error! #{tarball.inspect} is broken. Skipping."
+      next
+    end
 
-    # Change into the untarred directory
+    # Find the name of the ruby source directory (eg: src/ruby-2.1.1)
     ruby_dir = Dir["#{SRC_DIR}/*"].first
-    Dir.chdir ruby_dir
 
-    # Find all the source files
-    files = `find . -maxdepth 1 -name '*.c'`.each_line.to_a + `find ext -name '*.c'`.each_line.to_a
-    files.map!(&:chomp)
+    # Change into the ruby directory
+    chdir ruby_dir do
 
-    # system %{bash -c "cat <(find . -maxdepth 1 -name '*.c') <(find ext -name '*.c') | xargs yardoc --no-output --markup markdown"}
+      # Find all the source files
+      files = `find . -maxdepth 1 -name '*.c'`.each_line.to_a + `find ext -name '*.c'`.each_line.to_a
+      files.map!(&:chomp)
 
-    # Yard them!
-    system "yardoc", "--no-output", *files   # "--markup", "markdown"
+      # system %{bash -c "cat <(find . -maxdepth 1 -name '*.c') <(find ext -name '*.c') | xargs yardoc --no-output --markup markdown"}
 
-    # Move ruby/ruby-<verison>/.yardoc to cache_dir
-    Dir.chdir "../.."
-    FileUtils.mv "#{ruby_dir}/.yardoc", cache_dir
+      # Yard them!
+      system "yardoc", "--no-output", *files   # "--markup", "markdown"
+    end
+
+    mv "#{ruby_dir}/.yardoc", cache_dir
 
     # Cleanup
-    FileUtils.rm_r SRC_DIR
+    ensure_removed SRC_DIR
   end
 end
 
