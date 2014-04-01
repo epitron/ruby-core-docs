@@ -49,7 +49,7 @@ end
 ###############################################################################
 
 desc "Build, then 'gem push' all the built gems"
-task :release => :build do
+task :release do
   Dir["*.gem"].each { |gemfile| system "gem push #{gemfile}" }
 end
 
@@ -70,9 +70,13 @@ end
 ###############################################################################
 
 desc "Build all the YARD docs and all the gems for all the rubies in 'rubies/'"
-task :build => :docs do
+task :build, [:patchlevel] => [:docs] do |t, args|
+
+  patchlevel = args[:patchlevel]
+
   Dir["cache/*"].each do |cachedir|
     version = cachedir.split("/").last
+    version = "#{version}.#{patchlevel}" if patchlevel
 
     print_title "Building gem for Ruby #{version}..."
 
